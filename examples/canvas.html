@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@matthewjacobson/ess — canvas demo</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font: 14px/1.4 system-ui, sans-serif;
+        background: #0b0e14;
+        color: #c8d0e0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+      }
+      h1 { font-size: 16px; margin: 4px 0; font-weight: 600; }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+        justify-content: center;
+        max-width: 760px;
+      }
+      .controls label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+      select, button { font: inherit; padding: 4px 8px; border-radius: 6px;
+        border: 1px solid #2a3142; background: #161b26; color: inherit; }
+      button { cursor: pointer; }
+      button:hover { background: #1e2533; }
+      canvas { border-radius: 8px; background: #0e1118; box-shadow: 0 4px 24px rgba(0,0,0,.4); max-width: 100%; }
+      #status { font-variant-numeric: tabular-nums; min-height: 1.2em; }
+      .hint { color: #7b8497; font-size: 12px; max-width: 720px; text-align: center; }
+      code { color: #9ecbff; }
+    </style>
+  </head>
+  <body>
+    <h1>evenly-spaced streamlines · line width = spacing to nearest neighbor</h1>
+
+    <div class="controls">
+      <label>Field
+        <select id="field">
+          <option value="rotational">rotational (−y, x)</option>
+          <option value="saddle">saddle (x, −y)</option>
+          <option value="waves">waves (sin/cos)</option>
+          <option value="dipole">dipole</option>
+        </select>
+      </label>
+      <label>Separation (dSep): <span id="dSepVal">6</span>
+        <input id="dSep" type="range" min="3" max="20" step="1" value="6" />
+      </label>
+      <button id="run">Regenerate</button>
+    </div>
+
+    <canvas id="c" width="720" height="720"></canvas>
+    <div id="status">Loading…</div>
+    <p class="hint">
+      Thick strokes are far from their neighbors (sparse coverage); thin strokes are tightly packed.
+      The width comes straight from each point's <code>distanceToNearest</code>. The status line below the
+      canvas reflects the completion signal — it flips to “done” when <code>handle.done</code> resolves.
+    </p>
+
+    <!-- Local UMD build. Run `npm run build` first. For the CDN version see cdn-demo.html. -->
+    <script src="../dist/streamlines.umd.min.js"></script>
+    <script>
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const statusEl = document.getElementById('status');
+      const fieldSel = document.getElementById('field');
+      const dSepInput = document.getElementById('dSep');
+      const dSepVal = document.getElementById('dSepVal');
+
+      const bbox = { left: -50, top: -50, width: 100, height: 100 };
+
+      const fields = {
+        rotational: (x, y) => ({ x: -y, y: x }),
+        saddle: (x, y) => ({ x: x, y: -y }),
+        waves: (x, y) => ({ x: Math.sin(y / 8), y: Math.cos(x / 8) }),
+        dipole: (x, y) => {
+          // Superposition of a source and a sink — looks like a magnetic dipole.
+          const a = { x: x - 15, y };
+          const b = { x: x + 15, y };
+          const ra = Math.max(1e-3, a.x * a.x + a.y * a.y);
+          const rb = Math.max(1e-3, b.x * b.x + b.y * b.y);
+          return { x: a.x / ra - b.x / rb, y: a.y / ra - b.y / rb };
+        },
+      };
+
+      // Map field coordinates to canvas pixels.
+      const sx = canvas.width / bbox.width;
+      const sy = canvas.height / bbox.height;
+      const toPx = (p) => ({
+        x: (p.x - bbox.left) * sx,
+        y: (p.y - bbox.top) * sy,
+      });
+
+      let currentHandle = null;
+
+      function draw(result, dSep, dTest) {
+        ctx.fillStyle = '#0e1118';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Normalize line width from the actual spread of finite distances.
+        let lo = Infinity;
+        let hi = 0;
+        for (const sl of result.streamlines) {
+          for (const p of sl.points) {
+            const d = p.distanceToNearest;
+            if (Number.isFinite(d)) {
+              if (d < lo) lo = d;
+              if (d > hi) hi = d;
+            }
+          }
+        }
+        if (!Number.isFinite(lo)) { lo = dTest; hi = dSep; }
+        if (hi <= lo) hi = lo + 1;
+
+        const minW = 0.6;
+        const maxW = 5.5;
+        const widthFor = (d) => {
+          const dd = Number.isFinite(d) ? d : hi; // lone streamline -> widest
+          const t = Math.max(0, Math.min(1, (dd - lo) / (hi - lo)));
+          return minW + t * (maxW - minW);
+        };
+        // Color spacing too: tight = cool, sparse = warm.
+        const colorFor = (d) => {
+          const dd = Number.isFinite(d) ? d : hi;
+          const t = Math.max(0, Math.min(1, (dd - lo) / (hi - lo)));
+          const hue = 210 - t * 180; // 210 (blue) -> 30 (orange)
+          return `hsl(${hue} 80% 62%)`;
+        };
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const sl of result.streamlines) {
+          const pts = sl.points;
+          for (let i = 1; i < pts.length; i++) {
+            const a = pts[i - 1];
+            const b = pts[i];
+            const d = (a.distanceToNearest + b.distanceToNearest) / 2;
+            const pa = toPx(a);
+            const pb = toPx(b);
+            ctx.beginPath();
+            ctx.lineWidth = widthFor(d);
+            ctx.strokeStyle = colorFor(d);
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      async function run() {
+        if (currentHandle) currentHandle.cancel();
+
+        const dSep = Number(dSepInput.value);
+        const dTest = dSep / 2;
+        statusEl.textContent = 'Computing…';
+
+        const handle = streamlines.computeStreamlines({
+          vectorField: fields[fieldSel.value],
+          boundingBox: bbox,
+          dSep,
+          dTest,
+        });
+        currentHandle = handle;
+
+        const result = await handle.done;
+        if (handle !== currentHandle) return; // a newer run superseded this one
+
+        draw(result, dSep, dTest);
+        statusEl.textContent =
+          `Done — reason: ${result.reason} · ` +
+          `${result.streamlines.length} streamlines · ${result.pointCount} points`;
+      }
+
+      dSepInput.addEventListener('input', () => { dSepVal.textContent = dSepInput.value; });
+      dSepInput.addEventListener('change', run);
+      fieldSel.addEventListener('change', run);
+      document.getElementById('run').addEventListener('click', run);
+
+      run();
+    </script>
+  </body>
+</html>

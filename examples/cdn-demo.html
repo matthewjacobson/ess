@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@matthewjacobson/ess — CDN demo</title>
+    <style>
+      body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #0b0e14;
+        color: #c8d0e0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; }
+      h1 { font-size: 15px; font-weight: 600; }
+      canvas { background: #0e1118; border-radius: 8px; max-width: 100%; }
+      #status { font-variant-numeric: tabular-nums; }
+      code { color: #9ecbff; }
+    </style>
+  </head>
+  <body>
+    <h1>@matthewjacobson/ess, loaded straight from a CDN</h1>
+
+    <!--
+      The `unpkg`/`jsdelivr` package fields point at dist/streamlines.umd.min.js,
+      which registers a global named `streamlines`. Pin a version in production,
+      e.g. https://unpkg.com/@matthewjacobson/ess@0.1.0
+    -->
+    <script src="https://unpkg.com/@matthewjacobson/ess"></script>
+
+    <canvas id="c" width="640" height="640"></canvas>
+    <div id="status">Computing…</div>
+
+    <script>
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const bbox = { left: -50, top: -50, width: 100, height: 100 };
+      const sx = canvas.width / bbox.width;
+      const sy = canvas.height / bbox.height;
+
+      // `streamlines` is the UMD global exposed by the CDN script above.
+      streamlines
+        .computeStreamlines({
+          vectorField: (x, y) => ({ x: -y + Math.sin(x / 10) * 6, y: x }),
+          boundingBox: bbox,
+          dSep: 5,
+        })
+        .done.then((result) => {
+          // Line width straight from each point's distance to its nearest neighbor.
+          let hi = 0;
+          for (const sl of result.streamlines)
+            for (const p of sl.points)
+              if (Number.isFinite(p.distanceToNearest)) hi = Math.max(hi, p.distanceToNearest);
+
+          ctx.lineCap = 'round';
+          for (const sl of result.streamlines) {
+            const pts = sl.points;
+            for (let i = 1; i < pts.length; i++) {
+              const a = pts[i - 1], b = pts[i];
+              const d = (a.distanceToNearest + b.distanceToNearest) / 2;
+              const t = Math.min(1, (Number.isFinite(d) ? d : hi) / hi);
+              ctx.beginPath();
+              ctx.lineWidth = 0.6 + t * 5;
+              ctx.strokeStyle = `hsl(${210 - t * 180} 80% 62%)`;
+              ctx.moveTo((a.x - bbox.left) * sx, (a.y - bbox.top) * sy);
+              ctx.lineTo((b.x - bbox.left) * sx, (b.y - bbox.top) * sy);
+              ctx.stroke();
+            }
+          }
+
+          document.getElementById('status').textContent =
+            `Done — ${result.reason}: ${result.streamlines.length} streamlines, ${result.pointCount} points`;
+        });
+    </script>
+  </body>
+</html>

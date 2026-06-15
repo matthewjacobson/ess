@@ -1,0 +1,67 @@
+{
+  "name": "@matthewjacobson/ess",
+  "version": "0.1.0",
+  "description": "Compute evenly-spaced streamlines of a 2D vector field, with per-point nearest-neighbor spacing and an explicit completion signal. ESM + UMD, TypeScript-first.",
+  "homepage": "https://matthewjacobson.github.io/ess/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matthewjacobson/ess.git"
+  },
+  "bugs": {
+    "url": "https://github.com/matthewjacobson/ess/issues"
+  },
+  "type": "module",
+  "main": "./dist/streamlines.cjs",
+  "module": "./dist/streamlines.mjs",
+  "unpkg": "./dist/streamlines.umd.min.js",
+  "jsdelivr": "./dist/streamlines.umd.min.js",
+  "types": "./dist/streamlines.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/streamlines.d.ts",
+      "import": "./dist/streamlines.mjs",
+      "require": "./dist/streamlines.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rollup -c",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "streamlines",
+    "vector-field",
+    "flow",
+    "visualization",
+    "jobard-lefer",
+    "evenly-spaced",
+    "esm",
+    "umd"
+  ],
+  "license": "MIT",
+  "author": "Matthew Jacobson",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "rollup": "^4.21.0",
+    "rollup-plugin-dts": "^6.1.1",
+    "rollup-plugin-esbuild": "^6.1.1",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
