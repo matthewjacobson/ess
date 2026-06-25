@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeStreamlines } from '../src/index.js';
+import { computeStreamlines, computeStreamlinesSync } from '../src/index.js';
 import type { BoundingBox } from '../src/index.js';
 
 const bbox: BoundingBox = { left: -50, top: -50, width: 100, height: 100 };
@@ -130,5 +130,79 @@ describe('computeStreamlines', () => {
         expect(p.x).toBeGreaterThanOrEqual(-1e-6);
       }
     }
+  });
+});
+
+describe('computeStreamlinesSync', () => {
+  it('returns a completed result directly, without a Promise', () => {
+    const result = computeStreamlinesSync({
+      vectorField: (x, y) => ({ x: -y, y: x }),
+      boundingBox: bbox,
+      seed: { x: 10, y: 0 },
+      dSep: 5,
+    });
+
+    expect(result).not.toBeInstanceOf(Promise);
+    expect(result.finished).toBe(true);
+    expect(result.reason).toBe('completed');
+    expect(result.streamlines.length).toBeGreaterThan(1);
+    expect(result.pointCount).toBeGreaterThan(0);
+  });
+
+  it('produces the same field as the async variant for identical options', async () => {
+    const options = {
+      vectorField: (x: number, y: number) => ({ x: -y, y: x }),
+      boundingBox: bbox,
+      seed: { x: 10, y: 0 },
+      dSep: 5,
+      dTest: 2.5,
+    };
+    const sync = computeStreamlinesSync(options);
+    const async = await computeStreamlines(options).done;
+
+    expect(sync.streamlines.length).toBe(async.streamlines.length);
+    expect(sync.pointCount).toBe(async.pointCount);
+    for (let i = 0; i < sync.streamlines.length; i++) {
+      const a = sync.streamlines[i]!;
+      const b = async.streamlines[i]!;
+      expect(a.id).toBe(b.id);
+      expect(a.points.length).toBe(b.points.length);
+      for (let j = 0; j < a.points.length; j++) {
+        expect(a.points[j]!.x).toBeCloseTo(b.points[j]!.x, 10);
+        expect(a.points[j]!.y).toBeCloseTo(b.points[j]!.y, 10);
+        expect(a.points[j]!.distanceToNearest).toBeCloseTo(
+          b.points[j]!.distanceToNearest,
+          10,
+        );
+      }
+    }
+  });
+
+  it('ignores timeBudgetMs and never yields mid-run', () => {
+    // The whole loop runs before the next line executes; a `let` mutated by a
+    // deferred callback would still be undefined if it yielded.
+    const result = computeStreamlinesSync({
+      vectorField: (x, y) => ({ x: -y, y: x }),
+      boundingBox: bbox,
+      dSep: 2,
+      timeBudgetMs: 0,
+    });
+    expect(result.finished).toBe(true);
+  });
+
+  it('fires onComplete exactly once with the result', () => {
+    let calls = 0;
+    let seen: unknown = null;
+    const result = computeStreamlinesSync({
+      vectorField: () => ({ x: 1, y: 0 }),
+      boundingBox: bbox,
+      dSep: 8,
+      onComplete: (r) => {
+        calls++;
+        seen = r;
+      },
+    });
+    expect(calls).toBe(1);
+    expect(seen).toBe(result);
   });
 });

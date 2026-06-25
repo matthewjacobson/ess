@@ -135,18 +135,17 @@ function* seedCandidates(
   }
 }
 
-/**
- * Compute evenly-spaced streamlines of a 2D vector field.
- *
- * Returns immediately with a {@link StreamlinesHandle}; the work runs
- * cooperatively on the event loop. Await `handle.done` for the final result
- * (every point carries its finalized `distanceToNearest`), or call
- * `handle.cancel()` to stop early.
- */
-export function computeStreamlines(
-  options: StreamlinesOptions,
-): StreamlinesHandle {
-  const cfg = resolveOptions(options);
+/** Shared state and step logic backing both the async and sync entry points. */
+interface Runner {
+  /** Next seed to try, or `null` when growth queue and fallback are exhausted. */
+  nextSeed(): Vector | null;
+  /** Build and (if accepted) commit one streamline from `seed`. */
+  step(seed: Vector): void;
+  /** Run the post-processing pass and assemble the result. */
+  finalize(cancelled: boolean): StreamlinesResult;
+}
+
+function createRunner(options: StreamlinesOptions, cfg: Resolved): Runner {
   const field = options.vectorField;
   const grid = new LookupGrid(cfg.bbox, cfg.dSep);
   const streamlines: Streamline[] = [];
@@ -173,9 +172,6 @@ export function computeStreamlines(
       y: cfg.bbox.top + (row + 0.5) * fallbackStep,
     };
   };
-
-  let cancelled = false;
-  let settled = false;
 
   const commit = (path: Vector[]): void => {
     const id = nextId++;
@@ -208,6 +204,49 @@ export function computeStreamlines(
     return count;
   };
 
+  return {
+    nextSeed(): Vector | null {
+      if (head < queue.length) return queue[head++]!;
+      return nextFallbackSeed();
+    },
+    step(seed: Vector): void {
+      const path = buildStreamline(field, seed, cfg, grid);
+      if (path) commit(path);
+    },
+    finalize(cancelled: boolean): StreamlinesResult {
+      const pointCount = finalizeDistances();
+      const result: StreamlinesResult = {
+        streamlines,
+        finished: !cancelled,
+        reason: cancelled ? 'cancelled' : 'completed',
+        pointCount,
+      };
+      options.onComplete?.(result);
+      return result;
+    },
+  };
+}
+
+/**
+ * Compute evenly-spaced streamlines of a 2D vector field.
+ *
+ * Returns immediately with a {@link StreamlinesHandle}; the work runs
+ * cooperatively on the event loop. Await `handle.done` for the final result
+ * (every point carries its finalized `distanceToNearest`), or call
+ * `handle.cancel()` to stop early.
+ *
+ * Use {@link computeStreamlinesSync} instead when you want the result returned
+ * directly and don't need cooperative yielding or cancellation.
+ */
+export function computeStreamlines(
+  options: StreamlinesOptions,
+): StreamlinesHandle {
+  const cfg = resolveOptions(options);
+  const runner = createRunner(options, cfg);
+
+  let cancelled = false;
+  let settled = false;
+
   const run = async (): Promise<StreamlinesResult> => {
     // Yield once before doing any work so the caller can hold the handle and
     // (e.g.) cancel synchronously before the loop begins.
@@ -215,13 +254,10 @@ export function computeStreamlines(
 
     let lastYield = now();
     while (!cancelled) {
-      let seed: Vector | null;
-      if (head < queue.length) seed = queue[head++]!;
-      else seed = nextFallbackSeed();
+      const seed = runner.nextSeed();
       if (!seed) break; // growth queue and fallback sweep both exhausted
 
-      const path = buildStreamline(field, seed, cfg, grid);
-      if (path) commit(path);
+      runner.step(seed);
 
       if (now() - lastYield >= cfg.timeBudgetMs) {
         await yieldToEventLoop();
@@ -229,15 +265,8 @@ export function computeStreamlines(
       }
     }
 
-    const pointCount = finalizeDistances();
+    const result = runner.finalize(cancelled);
     settled = true;
-    const result: StreamlinesResult = {
-      streamlines,
-      finished: !cancelled,
-      reason: cancelled ? 'cancelled' : 'completed',
-      pointCount,
-    };
-    options.onComplete?.(result);
     return result;
   };
 
@@ -252,4 +281,28 @@ export function computeStreamlines(
       return settled;
     },
   };
+}
+
+/**
+ * Synchronous variant of {@link computeStreamlines}.
+ *
+ * Runs the entire computation to completion on the calling thread and returns
+ * the {@link StreamlinesResult} directly — no Promise, no cooperative yielding,
+ * and no `cancel()`. The `timeBudgetMs` option is ignored. Prefer this in
+ * scripts, workers, or other contexts where blocking is acceptable; use the
+ * async {@link computeStreamlines} when you need to keep a UI responsive or to
+ * cancel mid-run.
+ */
+export function computeStreamlinesSync(
+  options: StreamlinesOptions,
+): StreamlinesResult {
+  const cfg = resolveOptions(options);
+  const runner = createRunner(options, cfg);
+
+  let seed: Vector | null;
+  while ((seed = runner.nextSeed())) {
+    runner.step(seed);
+  }
+
+  return runner.finalize(false);
 }

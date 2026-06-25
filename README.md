@@ -52,6 +52,28 @@ for (const streamline of result.streamlines) {
 }
 ```
 
+### Synchronous
+
+If you don't need cooperative yielding or cancellation — e.g. in a script, a
+worker, or server-side rendering — `computeStreamlinesSync` runs the whole
+computation on the calling thread and returns the result directly (no promise,
+no handle). It accepts the same options (`timeBudgetMs` is ignored):
+
+```ts
+import { computeStreamlinesSync } from '@matthewjacobson/ess';
+
+const result = computeStreamlinesSync({
+  vectorField: (x, y) => ({ x: -y, y: x }),
+  boundingBox: { left: -50, top: -50, width: 100, height: 100 },
+  dSep: 8,
+});
+
+console.log(result.reason, result.pointCount); // 'completed' …
+```
+
+Output is identical to the async variant for the same options. Because it blocks
+until done it can't be cancelled, so `result.reason` is always `'completed'`.
+
 ### CommonJS
 
 ```js
@@ -146,6 +168,14 @@ other streamline anywhere in the field keeps `Infinity`.
 | `done` | `Promise<StreamlinesResult>` | Resolves when the run settles. Never rejects on cancellation. |
 | `cancel()` | `() => void` | Request an early stop (idempotent). |
 | `finished` | `boolean` | `true` once settled. |
+
+### `computeStreamlinesSync(options): StreamlinesResult`
+
+Synchronous variant. Takes the same options as `computeStreamlines` (`timeBudgetMs`
+is ignored) and returns the `StreamlinesResult` directly instead of a handle — no
+promise, no `cancel()`. `result.reason` is always `'completed'`. Use it when
+blocking is fine; use the async `computeStreamlines` to keep a UI responsive or to
+cancel mid-run.
 
 #### `StreamlinesResult`
 
