@@ -1,4 +1,4 @@
-export { computeStreamlines } from './streamlines.js';
+export { computeStreamlines, computeStreamlinesSync } from './streamlines.js';
 export type {
   BoundingBox,
   Streamline,

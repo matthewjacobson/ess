@@ -1,6 +1,6 @@
 {
   "name": "@matthewjacobson/ess",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Compute evenly-spaced streamlines of a 2D vector field, with per-point nearest-neighbor spacing and an explicit completion signal. ESM + UMD, TypeScript-first.",
   "homepage": "https://matthewjacobson.github.io/ess/",
   "repository": {
